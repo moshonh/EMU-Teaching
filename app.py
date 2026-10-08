@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3, random
+import sqlite3, random, hmac
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +17,9 @@ h1,h2,h3,p,li,label,div { font-family: Arial, sans-serif; }
 .small {font-size:.9rem;color:#555;}
 </style>''', unsafe_allow_html=True)
 
-DB = Path(__file__).with_name('emu_results.db')
+BASE = Path(__file__).resolve().parent
+MEDIA = BASE / 'media'
+DB = BASE / 'emu_results.db'
 PASS_GRADE = 75
 
 def db_init():
@@ -39,12 +41,36 @@ def get_results():
     with sqlite3.connect(DB) as con:
         return con.execute('SELECT student_name,student_id,score,passed,attempt,submitted_at FROM results ORDER BY submitted_at DESC').fetchall()
 
+def get_secret(name):
+    try:
+        return str(st.secrets.get(name, ""))
+    except Exception:
+        return ""
+
+# אימות בשרת לפני הצגת תוכן או טעינת מדיה
+if not st.session_state.get("emu_authenticated", False):
+    st.title("כניסה ללומדת EMU")
+    st.write("לומדה להכשרת סטודנטים לסיעוד – יחידת וידאו EEG")
+    with st.form("student_access"):
+        entered_code = st.text_input("קוד כניסה משותף", type="password")
+        enter = st.form_submit_button("כניסה ללומדה")
+    if enter:
+        secret = get_secret("EMU_ACCESS_CODE")
+        if not secret:
+            st.error("טרם הוגדר קוד כניסה בשרת. פנו למנהל הלומדה.")
+        elif hmac.compare_digest(entered_code, secret):
+            st.session_state.emu_authenticated = True
+            st.rerun()
+        else:
+            st.error("קוד כניסה שגוי")
+    st.stop()
+
 db_init()
 
 chapters = [
 ('פתיחה', '''### ברוכים הבאים ללומדת יחידת ניטור וידאו־EEG (EMU)
 
-**[כאן ישולב סרטון פתיחה קצר של ד״ר משה הרשקוביץ]**
+צפו בסרטון הפתיחה של ד״ר משה הרשקוביץ לפני תחילת הלמידה.
 
 בלומדה זו תלמדו מהי אפילפסיה, כיצד יכולים להיראות התקפים, מהו ניטור וידאו־EEG, מהם הסיכונים במהלך הניטור ובעיקר — מה תפקידכם בזמן שאתם משגיחים על המטופלים.
 
@@ -62,8 +88,7 @@ chapters = [
 - התקפים מוקדיים המתפשטים להתקף טוני־קלוני דו־צדדי.
 - התקפים כלליים.
 
-**[סרטון 1: התקף מוקדי]**  
-**[סרטון 2: התקף טוני־קלוני דו־צדדי]**
+בהמשך הפרק מוצגות שתי דוגמאות מצולמות: התקף מוקדי עם פגיעה במודעות והתקף טוני־קלוני. התבוננו בסימנים הקליניים ובמהלך האירוע.
 
 <div class="good"><b>מסר חשוב:</b> גם שינוי קטן בהתנהגות יכול להיות התקף. בזמן ניטור יש להתייחס לכל אירוע חדש או חריג ברצינות.</div>
 '''),
@@ -72,7 +97,7 @@ chapters = [
 
 PNES יכול להיראות דרמטי ואף דומה מאוד להתקף אפילפטי, אך אינו נגרם מפעילות אפילפטית מוחית. האבחנה נעשית על ידי הצוות המקצועי תוך שילוב המראה הקליני עם ה־EEG.
 
-**[סרטון 3: אירוע PNES]**
+בהמשך הפרק מוצגת דוגמה מצולמת של אירוע תפקודי (PNES). שימו לב לתיאור ההתנהגות ללא קביעת אבחנה על סמך הסרטון בלבד.
 
 <div class="warn"><b>חשוב:</b> תפקידכם אינו לקבוע אם האירוע אפילפטי או תפקודי. תפקידכם לצפות, לשמור על בטיחות, לתאר באופן אובייקטיבי ולתעד.</div>
 '''),
@@ -84,8 +109,7 @@ EEG הוא רישום של פעילות חשמלית מוחית באמצעות �
 ### איך יכול להיראות התקף בתרשים?
 בהתקף ניתן לעיתים לראות הופעה של פעילות קצבית המתפתחת לאורך זמן ומשתנה בתדירות, במשרעת או בפיזור.
 
-**[תמונה: EEG תקין]**  
-**[תמונה/קטע: תחילת התקף והתפתחותו]**
+בהמשך הפרק מוצגות שתי דוגמאות: תרשים EEG תקין ותרשים בזמן התקף. התמונות מיועדות להמחשה בלבד, ולא לתרגול פענוח.
 
 <div class="emu-box"><b>אינכם נדרשים לפענח EEG.</b> אם נראה שינוי חשוד בתרשים או מתקבלת התרעה ממערכת העזר — הסתכלו מיד על המטופל בווידאו ופעלו לפי הנוהל.</div>
 '''),
@@ -193,6 +217,9 @@ if 'student_name' not in st.session_state: st.session_state.student_name = ''
 if 'student_id' not in st.session_state: st.session_state.student_id = ''
 
 st.sidebar.title('🧠 לומדת EMU')
+if st.sidebar.button('התנתקות'):
+    st.session_state.clear()
+    st.rerun()
 mode = st.sidebar.radio('תצוגה', ['לומדה לסטודנט','מבחן מסכם','ניהול תוצאות'])
 
 if mode == 'לומדה לסטודנט':
@@ -204,6 +231,27 @@ if mode == 'לומדה לסטודנט':
     st.session_state.page = idx
     st.progress((idx+1)/len(chapters))
     st.markdown(chapters[idx][1], unsafe_allow_html=True)
+    # הצגת חומרים קליניים לפי פרק, בסדר הלמידה. שמות קבצים לטיניים למניעת בעיות נתיבים.
+    media_by_chapter = {
+        0: [('video', 'פתיחה – ד״ר משה הרשקוביץ', 'intro.mp4')],
+        1: [('video', 'דוגמה: התקף מוקדי עם פגיעה במודעות (FIA)', 'fia.mp4'),
+            ('video', 'דוגמה: התקף טוני־קלוני (TC)', 'tc.mp4')],
+        2: [('video', 'דוגמה: התקף תפקודי (PNES)', 'pnes.mp4')],
+        3: [('image', 'דוגמה לתרשים EEG תקין', 'normal_eeg.png'),
+            ('image', 'דוגמה לתרשים EEG במהלך התקף', 'eeg_seizure.png')],
+    }
+    for kind, heading, filename in media_by_chapter.get(idx, []):
+        path = MEDIA / filename
+        st.subheader(heading)
+        if path.is_file():
+            if kind == 'video':
+                st.video(str(path))
+            else:
+                st.image(str(path), caption=heading, use_container_width=True)
+        else:
+            st.info(f'קובץ המדיה עדיין לא נמצא: {filename}')
+    if idx in (1, 2):
+        st.caption('הסרטונים מיועדים להכשרה מקצועית בלבד. אין להעתיקם, לשתפם או להורידם ללא אישור מתאים.')
     a,b = st.columns(2)
     with a:
         if idx>0 and st.button('→ הפרק הקודם', use_container_width=True): st.session_state.page-=1; st.rerun()
@@ -238,7 +286,18 @@ elif mode == 'מבחן מסכם':
 
 else:
     st.title('ניהול תוצאות')
-    st.warning('בגרסת הפיתוח מסך זה אינו מוגן. לפני העלאה לשימוש אמיתי יש להוסיף אימות מנהל.')
+    if not st.session_state.get('emu_admin_authenticated', False):
+        with st.form('admin_access'):
+            admin_code = st.text_input('סיסמת מנהל', type='password')
+            admin_submit = st.form_submit_button('כניסה למסך הניהול')
+        if admin_submit:
+            expected = get_secret('EMU_ADMIN_PASSWORD')
+            if expected and hmac.compare_digest(admin_code, expected):
+                st.session_state.emu_admin_authenticated = True
+                st.rerun()
+            else:
+                st.error('סיסמת מנהל שגויה או לא הוגדרה')
+        st.stop()
     rows=get_results()
     if not rows: st.info('עדיין אין תוצאות.')
     else:
