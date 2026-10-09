@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3, random, hmac
+import random, hmac, uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -19,27 +19,46 @@ h1,h2,h3,p,li,label,div { font-family: Arial, sans-serif; }
 
 BASE = Path(__file__).resolve().parent
 MEDIA = BASE / 'media'
-DB = BASE / 'emu_results.db'
 PASS_GRADE = 75
 
-def db_init():
-    with sqlite3.connect(DB) as con:
-        con.execute('''CREATE TABLE IF NOT EXISTS results(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id TEXT, student_name TEXT, score INTEGER,
-            correct INTEGER, total INTEGER, passed INTEGER,
-            attempt INTEGER, submitted_at TEXT)''')
+@st.cache_resource
+def sheet_client(sheet_id, client_email):
+    import gspread
+    from google.oauth2.service_account import Credentials
+    info = dict(st.secrets["gcp_service_account"])
+    credentials = Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    return gspread.authorize(credentials).open_by_key(sheet_id).worksheet("כל הניסיונות")
 
-def save_result(sid, name, score, correct, total):
-    with sqlite3.connect(DB) as con:
-        attempt = con.execute('SELECT COUNT(*) FROM results WHERE student_id=?',(sid,)).fetchone()[0]+1
-        con.execute('INSERT INTO results(student_id,student_name,score,correct,total,passed,attempt,submitted_at) VALUES(?,?,?,?,?,?,?,?)',
-                    (sid,name,score,correct,total,int(score>=PASS_GRADE),attempt,datetime.now().isoformat(timespec='seconds')))
-        return attempt
+def worksheet():
+    sheet_id = str(st.secrets["GOOGLE_SHEET_ID"])
+    email = str(st.secrets["gcp_service_account"]["client_email"])
+    return sheet_client(sheet_id, email)
+
+def save_result(sid, name, score, correct, total, attempt_uuid):
+    ws = worksheet()
+    rows = ws.get_all_values()
+    # Columns: UUID, name, time, attempt, correct, total, score, pass, version, student ID, unique token
+    if any(len(r) > 10 and r[10] == attempt_uuid for r in rows[1:]):
+        match = next(r for r in rows[1:] if len(r) > 10 and r[10] == attempt_uuid)
+        return int(match[3])
+    attempt = 1 + sum(len(r) > 9 and r[9] == sid for r in rows[1:])
+    ws.append_row([
+        attempt_uuid, name, datetime.now().astimezone().isoformat(timespec="seconds"),
+        attempt, correct, total, score, "עבר" if score >= PASS_GRADE else "לא עבר",
+        "EMU v3", sid, attempt_uuid
+    ], value_input_option="RAW")
+    return attempt
 
 def get_results():
-    with sqlite3.connect(DB) as con:
-        return con.execute('SELECT student_name,student_id,score,passed,attempt,submitted_at FROM results ORDER BY submitted_at DESC').fetchall()
+    rows = worksheet().get_all_values()[1:]
+    results = []
+    for r in rows:
+        if len(r) >= 10 and r[1]:
+            results.append((r[1], r[9], int(float(r[6])), 1 if r[7] == "עבר" else 0,
+                            int(float(r[3])), r[2]))
+    return list(reversed(results))
 
 def get_secret(name):
     try:
@@ -65,7 +84,7 @@ if not st.session_state.get("emu_authenticated", False):
             st.error("קוד כניסה שגוי")
     st.stop()
 
-db_init()
+
 
 chapters = [
 ('פתיחה', '''### ברוכים הבאים ללומדת יחידת ניטור וידאו־EEG (EMU)
@@ -414,7 +433,15 @@ elif mode == 'מבחן מסכם':
             for a,(_,opts,c) in zip(answers,questions):
                 if a==opts[c]: correct_n+=1
             score=round(100*correct_n/len(questions))
-            attempt=save_result(sid.strip(),name.strip(),score,correct_n,len(questions))
+            if "pending_attempt_uuid" not in st.session_state:
+                st.session_state.pending_attempt_uuid = str(uuid.uuid4())
+            try:
+                attempt=save_result(sid.strip(),name.strip(),score,correct_n,len(questions),
+                                    st.session_state.pending_attempt_uuid)
+            except Exception:
+                st.error("לא ניתן לשמור את הציון ב-Google Sheets. התוצאה לא נשמרה; יש לפנות למנהל ולנסות שוב.")
+                st.stop()
+            del st.session_state.pending_attempt_uuid
             if score>=PASS_GRADE: st.success(f'עברת את המבחן! ציון: {score}% ({correct_n}/20). ניסיון מספר {attempt}.')
             else: st.error(f'ציון: {score}% ({correct_n}/20). ציון המעבר הוא {PASS_GRADE}%. ניתן לעבור שוב על הלומדה ולנסות שנית.')
 
@@ -432,7 +459,11 @@ else:
             else:
                 st.error('סיסמת מנהל שגויה או לא הוגדרה')
         st.stop()
-    rows=get_results()
+    try:
+        rows=get_results()
+    except Exception:
+        st.error("לא ניתן לקרוא ציונים מ-Google Sheets. בדוק את הגדרות Secrets והרשאת Editor.")
+        st.stop()
     if not rows: st.info('עדיין אין תוצאות.')
     else:
         import pandas as pd
