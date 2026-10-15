@@ -89,9 +89,7 @@ if not st.session_state.get("emu_authenticated", False):
 chapters = [
 ('פתיחה', '''### ברוכים הבאים ללומדת יחידת ניטור וידאו־EEG (EMU)
 
-צפו בסרטון הפתיחה של ד״ר משה הרשקוביץ לפני תחילת הלמידה.
-
-### ראשי תיבות
+###  ראשי תיבות בשימוש בלומדה
 
 - EMU – Epilepsy Monitoring Unit
 - EEG – Electroencephalography
@@ -99,6 +97,8 @@ chapters = [
 - PNES – Psychogenic Non-Epileptic Seizures
 - ASM – Antiseizure Medication
 - ECG – Electrocardiography
+
+צפו בסרטון הפתיחה של ד״ר משה הרשקוביץ לפני תחילת הלמידה.
 
 בלומדה זו תלמדו מהי אפילפסיה, כיצד יכולים להיראות התקפים, מהו ניטור וידאו־EEG, מהם הסיכונים במהלך הניטור ובעיקר — מה תפקידכם בזמן שאתם משגיחים על המטופלים.
 
